@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Compiler Pipeline Visualizer</title>
+    <meta name="description" content="Interactive SQL compiler pipeline visualizer — see tokenization, parsing, semantic analysis, intermediate code generation, and optimization in real time.">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- CodeMirror 6 via CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/material-darker.css">
+
+    <!-- App styles -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- ─── Top Bar ─────────────────────────────────────────────────────── -->
+    <header id="app-header">
+        <div class="header-left">
+            <div class="logo" id="logo">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                    <rect x="2" y="2" width="24" height="24" rx="6" stroke="url(#logo-grad)" stroke-width="2.5"/>
+                    <path d="M8 10h12M8 14h8M8 18h10" stroke="url(#logo-grad)" stroke-width="2" stroke-linecap="round"/>
+                    <defs>
+                        <linearGradient id="logo-grad" x1="0" y1="0" x2="28" y2="28">
+                            <stop stop-color="#00d4ff"/>
+                            <stop offset="1" stop-color="#a855f7"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <h1>SQL Compiler <span class="accent">Pipeline</span></h1>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="pipeline-timer" id="pipeline-timer">
+                <span class="timer-label">Pipeline</span>
+                <span class="timer-value" id="timer-value">—</span>
+            </div>
+            <button class="btn-icon" id="btn-schema" title="View Database Schema">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+                </svg>
+            </button>
+            <button class="btn-icon" id="btn-help" title="Help">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- ─── Main Content (Side by Side) ─────────────────────────────────── -->
+    <main id="app-main">
+        <!-- ── Left Panel: SQL Editor ─────────────────────────────────── -->
+        <section class="panel panel-editor" id="panel-editor">
+            <div class="panel-header">
+                <h2 class="panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                    SQL Input
+                </h2>
+                <div class="panel-actions">
+                    <select id="example-select" class="select-examples">
+                        <option value="">Load Example…</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="editor-wrapper" id="editor-wrapper">
+                <textarea id="sql-editor">SELECT u.username, u.email, COUNT(o.id) AS order_count
+FROM users u
+INNER JOIN orders o ON u.id = o.user_id
+WHERE u.is_active = TRUE
+GROUP BY u.username, u.email
+HAVING COUNT(o.id) > 5
+ORDER BY order_count DESC
+LIMIT 10;</textarea>
+            </div>
+
+            <div class="editor-footer">
+                <button class="btn-compile" id="btn-compile">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Compile
+                </button>
+                <button class="btn-clear" id="btn-clear">Clear</button>
+                <div class="editor-info" id="editor-info">
+                    <span id="char-count">0 chars</span>
+                    <span class="sep">·</span>
+                    <span id="line-count">0 lines</span>
+                </div>
+            </div>
+
+            <!-- Schema Sidebar (toggleable) -->
+            <div class="schema-sidebar" id="schema-sidebar">
+                <div class="schema-header">
+                    <h3>Database Schema</h3>
+                    <button class="btn-close-schema" id="btn-close-schema">×</button>
+                </div>
+                <div class="schema-content" id="schema-content">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Divider ────────────────────────────────────────────────── -->
+        <div class="panel-divider" id="panel-divider"></div>
+
+        <!-- ── Right Panel: Pipeline Visualization ────────────────────── -->
+        <section class="panel panel-pipeline" id="panel-pipeline">
+            <div class="panel-header">
+                <h2 class="panel-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    Compilation Pipeline
+                </h2>
+                <div class="panel-actions">
+                    <button class="btn-expand-all" id="btn-expand-all" title="Expand All">Expand All</button>
+                    <button class="btn-collapse-all" id="btn-collapse-all" title="Collapse All">Collapse All</button>
+                </div>
+            </div>
+
+            <div class="pipeline-stages" id="pipeline-stages">
+                <!-- ── Stage 1: Lexer ──────────────────────────────── -->
+                <div class="stage-card" id="stage-lexer" data-stage="lexer">
+                    <div class="stage-header" data-stage="lexer">
+                        <div class="stage-indicator">
+                            <span class="stage-number">1</span>
+                            <div class="stage-connector"></div>
+                        </div>
+                        <div class="stage-title-group">
+                            <h3 class="stage-title">Lexical Analysis</h3>
+                            <span class="stage-subtitle">Tokenizer</span>
+                        </div>
+                        <div class="stage-meta">
+                            <span class="stage-time" id="lexer-time">—</span>
+                            <span class="stage-status" id="lexer-status"></span>
+                            <svg class="stage-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                    </div>
+                    <div class="stage-body" id="lexer-body">
+                        <div class="stage-description">
+                            Breaks the SQL input into a stream of classified tokens — keywords, identifiers, operators, literals, and punctuation.
+                        </div>
+                        <div class="stage-output" id="lexer-output">
+                            <div class="stage-placeholder">Click <strong>Compile</strong> to see tokenization results</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Stage 2: Parser ─────────────────────────────── -->
+                <div class="stage-card" id="stage-parser" data-stage="parser">
+                    <div class="stage-header" data-stage="parser">
+                        <div class="stage-indicator">
+                            <span class="stage-number">2</span>
+                            <div class="stage-connector"></div>
+                        </div>
+                        <div class="stage-title-group">
+                            <h3 class="stage-title">Syntax Analysis</h3>
+                            <span class="stage-subtitle">Parser → AST</span>
+                        </div>
+                        <div class="stage-meta">
+                            <span class="stage-time" id="parser-time">—</span>
+                            <span class="stage-status" id="parser-status"></span>
+                            <svg class="stage-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                    </div>
+                    <div class="stage-body" id="parser-body">
+                        <div class="stage-description">
+                            Parses the token stream using recursive descent to build an Abstract Syntax Tree (AST) representing the query structure.
+                        </div>
+                        <div class="stage-output" id="parser-output">
+                            <div class="stage-placeholder">Click <strong>Compile</strong> to see the AST</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Stage 3: Semantic ───────────────────────────── -->
+                <div class="stage-card" id="stage-semantic" data-stage="semantic">
+                    <div class="stage-header" data-stage="semantic">
+                        <div class="stage-indicator">
+                            <span class="stage-number">3</span>
+                            <div class="stage-connector"></div>
+                        </div>
+                        <div class="stage-title-group">
+                            <h3 class="stage-title">Semantic Analysis</h3>
+                            <span class="stage-subtitle">Type Checking & Validation</span>
+                        </div>
+                        <div class="stage-meta">
+                            <span class="stage-time" id="semantic-time">—</span>
+                            <span class="stage-status" id="semantic-status"></span>
+                            <svg class="stage-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                    </div>
+                    <div class="stage-body" id="semantic-body">
+                        <div class="stage-description">
+                            Validates the AST against the database schema — checks table/column existence, type compatibility, and aggregate rules.
+                        </div>
+                        <div class="stage-output" id="semantic-output">
+                            <div class="stage-placeholder">Click <strong>Compile</strong> to see semantic analysis</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Stage 4: ICG ────────────────────────────────── -->
+                <div class="stage-card" id="stage-icg" data-stage="icg">
+                    <div class="stage-header" data-stage="icg">
+                        <div class="stage-indicator">
+                            <span class="stage-number">4</span>
+                            <div class="stage-connector"></div>
+                        </div>
+                        <div class="stage-title-group">
+                            <h3 class="stage-title">Intermediate Code Gen</h3>
+                            <span class="stage-subtitle">Relational Algebra</span>
+                        </div>
+                        <div class="stage-meta">
+                            <span class="stage-time" id="icg-time">—</span>
+                            <span class="stage-status" id="icg-status"></span>
+                            <svg class="stage-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                    </div>
+                    <div class="stage-body" id="icg-body">
+                        <div class="stage-description">
+                            Converts the AST into relational algebra operations — σ (selection), π (projection), ⋈ (join), γ (grouping), τ (sort).
+                        </div>
+                        <div class="stage-output" id="icg-output">
+                            <div class="stage-placeholder">Click <strong>Compile</strong> to see relational algebra</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Stage 5: Optimizer ──────────────────────────── -->
+                <div class="stage-card" id="stage-optimizer" data-stage="optimizer">
+                    <div class="stage-header" data-stage="optimizer">
+                        <div class="stage-indicator">
+                            <span class="stage-number">5</span>
+                        </div>
+                        <div class="stage-title-group">
+                            <h3 class="stage-title">Query Optimization</h3>
+                            <span class="stage-subtitle">Rule-based Optimizer</span>
+                        </div>
+                        <div class="stage-meta">
+                            <span class="stage-time" id="optimizer-time">—</span>
+                            <span class="stage-status" id="optimizer-status"></span>
+                            <svg class="stage-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                    </div>
+                    <div class="stage-body" id="optimizer-body">
+                        <div class="stage-description">
+                            Applies optimization rules: predicate pushdown, projection pushdown, constant folding, join reordering, and redundancy elimination.
+                        </div>
+                        <div class="stage-output" id="optimizer-output">
+                            <div class="stage-placeholder">Click <strong>Compile</strong> to see optimization results</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ─── Help Modal ─────────────────────────────────────────────────── -->
+    <div class="modal-overlay" id="help-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>How It Works</h2>
+                <button class="btn-close-modal" id="btn-close-help">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="help-section">
+                    <h3>🔵 Stage 1 — Lexical Analysis</h3>
+                    <p>The lexer scans the raw SQL text character by character and groups them into <strong>tokens</strong>: keywords (<code>SELECT</code>, <code>FROM</code>), identifiers (table/column names), operators (<code>=</code>, <code>&gt;</code>), literals (numbers, strings), and punctuation.</p>
+                </div>
+                <div class="help-section">
+                    <h3>🟣 Stage 2 — Syntax Analysis (Parsing)</h3>
+                    <p>The parser reads the token stream and builds an <strong>Abstract Syntax Tree (AST)</strong> using recursive descent parsing. The AST represents the hierarchical structure of the SQL statement — which clauses contain which expressions.</p>
+                </div>
+                <div class="help-section">
+                    <h3>🟢 Stage 3 — Semantic Analysis</h3>
+                    <p>The semantic analyzer validates the AST against the database schema. It checks that tables and columns exist, verifies type compatibility in comparisons, and ensures aggregate functions are used correctly with <code>GROUP BY</code>.</p>
+                </div>
+                <div class="help-section">
+                    <h3>🟠 Stage 4 — Intermediate Code Generation</h3>
+                    <p>The ICG converts the AST into <strong>relational algebra</strong> — a mathematical notation used internally by databases. Operations like σ (selection), π (projection), and ⋈ (join) describe how data flows through the query plan.</p>
+                </div>
+                <div class="help-section">
+                    <h3>🩷 Stage 5 — Query Optimization</h3>
+                    <p>The optimizer applies rules to improve the query plan: pushing filters closer to data sources (predicate pushdown), reordering joins by table size, folding constant expressions, and eliminating redundant operations.</p>
+                </div>
+                <div class="help-section">
+                    <h3>📊 Mock Database</h3>
+                    <p>This tool uses a simulated database schema with tables: <strong>users</strong>, <strong>orders</strong>, <strong>products</strong>, <strong>departments</strong>, and <strong>employees</strong>. Click the database icon in the header to view the full schema.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── Scripts ────────────────────────────────────────────────────── -->
+    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/sql/sql.min.js"></script>
+    <script src="js/ast-renderer.js"></script>
+    <script src="js/pipeline.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
