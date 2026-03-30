@@ -9,8 +9,13 @@ Endpoints:
 
 import time
 import traceback
+import sys
+import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
+# Ensure the backend directory is in the Python path for Vercel's lambda runner
+sys.path.append(os.path.dirname(__file__))
 
 from compiler.lexer import tokenize
 from compiler.parser import parse
